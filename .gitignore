@@ -1,0 +1,46 @@
+# Build directories
+build/
+*.egg-info/
+dist/
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+.pytest_cache/
+.Python
+*.egg
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Generated MLIR files
+*.inc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python virtual env
+venv/
+env/
+.venv/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store

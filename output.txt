@@ -1,0 +1,303 @@
+=== ./build.sh ===
+#!/bin/bash
+set -e
+LLVM_DIR=/usr/local/opt/llvm
+MLIR_DIR=/usr/local/opt/llvm/lib/cmake/mlir
+
+mkdir -p build && cd build
+cmake -DLLVM_DIR=$LLVM_DIR/lib/cmake/llvm \
+      -DMLIR_DIR=$MLIR_DIR \
+      ..
+make 
+
+# mkdir -p build && cd build
+# cmake -DLLVM_DIR=$LLVM_DIR/lib/cmake/llvm -DMLIR_DIR=$MLIR_DIR ..
+# make
+# make install
+
+# Step 1
+# cd ..
+# # cd ..
+# # python3 -c "from iam import Tensor; t=Tensor([2,3]); print(f'✓ Works: {t.shape()}, size={t.size()}')"
+# echo -e "\n=== Testing ==="
+# # Add python directory to PYTHONPATH so it can find iam package
+# export PYTHONPATH="${PWD}/python:${PYTHONPATH}"
+
+# python3 -c "from iam import Tensor; t=Tensor([2,3]); print(f'✓ Shape: {t.shape()}, Size: {t.size()}')"
+
+# echo -e "\n=== Running unit tests ==="
+# python3 -m pytest tests/unit/test_core.py -v
+
+# Step 2
+# mkdir -p build && cd build
+# cmake -DLLVM_DIR=/usr/local/opt/llvm/lib/cmake/llvm \
+#       -DMLIR_DIR=/usr/local/opt/llvm/lib/cmake/mlir \
+#       ..
+# make
+
+./mlir/test_iam_dialect
+=== ./CMakeLists.txt ===
+cmake_minimum_required(VERSION 3.20)
+project(iam VERSION 0.1.0)
+set(CMAKE_CXX_STANDARD 17)
+
+find_package(MLIR REQUIRED CONFIG)
+find_package(LLVM REQUIRED CONFIG)
+find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_package(pybind11 CONFIG REQUIRED)
+
+# Add MLIR CMake modules (for mlir_tablegen command)
+list(APPEND CMAKE_MODULE_PATH "${MLIR_CMAKE_DIR}")
+list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
+include(TableGen)
+include(AddLLVM)
+include(AddMLIR)
+
+include_directories(${LLVM_INCLUDE_DIRS})
+include_directories(${MLIR_INCLUDE_DIRS})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/cpp/include)
+
+add_subdirectory(cpp)
+add_subdirectory(python/bindings)
+add_subdirectory(mlir)
+
+=== ./cpp/CMakeLists.txt ===
+add_library(iam_core STATIC
+    src/iam/core/Tensor.cpp
+)
+target_include_directories(iam_core PUBLIC include)
+
+=== ./cpp/include/iam/core/Tensor.hpp ===
+#pragma once
+#include <vector>
+
+namespace iam {
+class Tensor {
+public:
+    Tensor(std::vector<int> shape) : shape_(shape) {}
+    std::vector<int> shape() const { return shape_; }
+    int size() const;
+private:
+    std::vector<int> shape_;
+};
+}
+
+=== ./cpp/src/iam/core/Tensor.cpp ===
+#include "iam/core/Tensor.hpp"
+#include <numeric>
+
+namespace iam {
+int Tensor::size() const {
+    return std::accumulate(shape_.begin(), shape_.end(), 1, std::multiplies<int>());
+}
+}
+
+=== ./mlir/CMakeLists.txt ===
+# IAM MLIR Dialect
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+# TableGen support
+set(LLVM_TARGET_DEFINITIONS tablegen/IAMBase.td)
+mlir_tablegen(IAMDialect.h.inc -gen-dialect-decls)
+mlir_tablegen(IAMDialect.cpp.inc -gen-dialect-defs)
+add_public_tablegen_target(MLIRIAMIncGen)
+
+add_library(IAMDialect STATIC
+  lib/iam/Dialect/IAMDialect.cpp
+)
+
+add_dependencies(IAMDialect MLIRIAMIncGen)
+
+# Add build directory to include path (for generated .inc files)
+target_include_directories(IAMDialect PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${CMAKE_CURRENT_BINARY_DIR}
+)
+
+target_link_libraries(IAMDialect
+  PUBLIC
+  MLIRIR
+  MLIRSupport
+)
+
+# Test executable
+add_executable(test_iam_dialect
+  test/test_dialect.cpp
+)
+
+target_link_libraries(test_iam_dialect
+  PRIVATE
+  IAMDialect
+  MLIRIR
+  MLIRSupport
+)
+=== ./mlir/include/iam/Dialect/IAMDialect.hpp ===
+#pragma once
+
+#include "mlir/IR/Dialect.h"
+
+// Include generated dialect declarations
+#include "IAMDialect.h.inc"
+
+namespace mlir {
+namespace iam {
+
+class IAMDialect : public Dialect {
+public:
+  explicit IAMDialect(MLIRContext *context);
+  
+  static StringRef getDialectNamespace() { return "iam"; }
+  
+  void initialize();
+};
+
+} // namespace iam
+} // namespace mlir
+=== ./mlir/lib/iam/Dialect/IAMDialect.cpp ===
+#include "iam/Dialect/IAMDialect.hpp"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DialectImplementation.h"
+
+// Include generated dialect definitions
+#include "IAMDialect.cpp.inc"
+
+using namespace mlir;
+using namespace mlir::iam;
+
+void IAMDialect::initialize() {
+  // Operations will be added in Steps 3-5
+}
+=== ./mlir/test/test_dialect.cpp ===
+#include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Dialect.h"
+#include "iam/Dialect/IAMDialect.hpp"
+#include "llvm/Support/raw_ostream.h"
+
+using namespace mlir;
+
+int main() {
+  MLIRContext context;
+  
+  // Test: Load IAM dialect
+  context.getOrLoadDialect<iam::IAMDialect>();
+  
+  // Test: Verify it's registered
+  Dialect* dialect = context.getLoadedDialect("iam");
+  if (!dialect) {
+    llvm::errs() << "FAIL: IAM dialect not loaded\n";
+    return 1;
+  }
+  
+  llvm::outs() << "✓ IAM dialect loaded successfully\n";
+  llvm::outs() << "  Namespace: " << dialect->getNamespace() << "\n";
+  
+  return 0;
+}
+
+=== ./python/bindings/CMakeLists.txt ===
+pybind11_add_module(_iam_core core_bindings.cpp)
+target_link_libraries(_iam_core PRIVATE iam_core)
+install(TARGETS _iam_core DESTINATION ${CMAKE_SOURCE_DIR}/python/iam)
+=== ./python/bindings/core_bindings.cpp ===
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include "iam/core/Tensor.hpp"
+
+namespace py = pybind11;
+
+PYBIND11_MODULE(_iam_core, m) {
+    py::class_<iam::Tensor>(m, "Tensor")
+        .def(py::init<std::vector<int>>())
+        .def("shape", &iam::Tensor::shape)
+        .def("size", &iam::Tensor::size);
+}
+
+=== ./python/iam/__init__.py ===
+__version__ = "0.1.0"
+from iam._iam_core import Tensor
+__all__ = ["Tensor"]
+
+=== ./setup.py ===
+from setuptools import setup, Extension
+from setuptools.command.build_ext import build_ext
+import subprocess
+import sys
+import os
+
+class CMakeBuild(build_ext):
+    def run(self):
+        try:
+            subprocess.check_output(['cmake', '--version'])
+        except OSError:
+            raise RuntimeError("CMake required")
+        
+        for ext in self.extensions:
+            self.build_extension(ext)
+    
+    def build_extension(self, ext):
+        # Use your LLVM/MLIR paths
+        LLVM_DIR = "/usr/local/opt/llvm"
+        MLIR_DIR = "/usr/local/opt/llvm/lib/cmake/mlir"
+        
+        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+        build_temp = os.path.abspath(self.build_temp)
+        os.makedirs(build_temp, exist_ok=True)
+        
+        cmake_args = [
+            f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}/iam',
+            f'-DPYTHON_EXECUTABLE={sys.executable}',
+            f'-DLLVM_DIR={LLVM_DIR}/lib/cmake/llvm',
+            f'-DMLIR_DIR={MLIR_DIR}',
+        ]
+        
+        build_args = ['--', '-j4']
+        
+        subprocess.check_call(['cmake', ext.sourcedir] + cmake_args, cwd=build_temp)
+        subprocess.check_call(['cmake', '--build', '.'] + build_args, cwd=build_temp)
+
+class CMakeExtension(Extension):
+    def __init__(self, name, sourcedir=''):
+        Extension.__init__(self, name, sources=[])
+        self.sourcedir = os.path.abspath(sourcedir)
+
+setup(
+    name='iam',
+    version='0.1.0',
+    packages=['iam'],
+    package_dir={'': 'python'},
+    ext_modules=[CMakeExtension('iam._iam_core')],
+    cmdclass={'build_ext': CMakeBuild},
+    install_requires=['torch>=2.0.0', 'numpy>=1.21.0'],
+)
+
+=== ./test_step2.sh ===
+#!/bin/bash
+set -e
+
+LLVM_DIR=/usr/local/opt/llvm
+MLIR_DIR=/usr/local/opt/llvm/lib/cmake/mlir
+
+echo "=== Building Step 2: IAM Dialect ==="
+mkdir -p build && cd build
+cmake -DLLVM_DIR=$LLVM_DIR/lib/cmake/llvm \
+      -DMLIR_DIR=$MLIR_DIR \
+      ..
+make 
+
+echo -e "\n=== Testing IAM Dialect ==="
+./mlir/test_iam_dialect
+
+echo -e "\n✓ Step 2 Complete: IAM dialect registered"
+=== ./tests/unit/test_core.py ===
+from iam import Tensor
+
+def test_tensor_shape():
+    t = Tensor([2, 3, 4])
+    assert t.shape() == [2, 3, 4]
+
+def test_tensor_size():
+    t = Tensor([2, 3, 4])
+    assert t.size() == 24
+
